@@ -58,7 +58,7 @@ for j in range(2,max_step+1):
     high_word.extend(tt.index)
 
 high_word=set(high_word)
-#第二步，切分源文章，进行粗略分词。
+#第二步，切分源文章，进行粗略分词。思路是子片段在集合G中,它所经过的路径位置都加1.
 rr=np.array([0]*(len(s)-1))
 for i in range(len(s)-1):
     for j in range(2,max_step+1):
