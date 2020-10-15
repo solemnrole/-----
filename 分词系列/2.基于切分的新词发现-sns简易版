@@ -1,0 +1,52 @@
+'''
+基于切分的新词发现
+此算法是在sns基础上进行了变种，主要是由于考虑了边界熵以后，效率比较低；
+本代码是换了一个思路，原来思路是先求凝固度较大的词，在此基础上再进行二次边界熵求解，
+反过来想也就是如果两个字凝固度不高，则应该将其断开，随后再根据词频统计排序，直接获得词库。
+代码实现的思路：1、求凝固度较高的2字词；2、根据第一步的结果对原文进行切分；3、统计词频
+参：https://kexue.fm/archives/3913
+'''
+import re
+import numpy as np
+import pandas as pd
+f = open('C:/Users/shiwl1/Desktop/folders/data/dpcq.txt', 'r',encoding='utf-8')  # 读取文章
+s = f.read()  # 读取为一个字符串
+s=re.sub('[^A-Za-z\u4e00-\u9fa5]','',s)
+
+min_count=10#词频
+min_support=30#词频
+
+d=pd.Series(list(s)).value_counts()
+tsum=d.sum()#用于计算凝固度
+ngrams=[]
+ngrams.append(d)
+ngrams.append([])
+
+for i in range(2):
+    ngrams[-1]+=re.findall('(..)',s[i:])
+ngrams[-1]=pd.Series(ngrams[-1]).value_counts()
+ngrams[-1]=ngrams[-1][ngrams[-1]>min_count]
+
+qq=np.asarray(list(map(lambda ms: tsum * ngrams[1][ms]/ngrams[0][ms[0]]/ngrams[0][ms[1]],ngrams[1].index)))>min_support
+ngrams[-1]=ngrams[-1][qq]
+
+word=[[],[]]
+start=s[0]
+for i in range(len(s)-1):
+    if s[i:i+2] in ngrams[-1]:
+        start+=s[i+1]
+    else:
+        if len(start)==1:
+            word[0].append(start)
+        else:
+            word[1].append(start)
+        start=s[i+1]
+if len(start) == 1:
+    word[0].append(start)
+else:
+    word[1].append(start)
+
+
+ww=pd.Series(word[1]).value_counts().sort_values(ascending=False)
+
+ww[ww>min_count].to_csv('2_result.txt',encoding='utf-8',header=False)
