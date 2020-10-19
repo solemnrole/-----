@@ -57,7 +57,8 @@ def hmm_cut(obs):
     paths={i:(np.log(emis[i][obs[0]]+1)-log_total_state[i]) for i in 'sb'}
     for t in range(1, T):
         path_={}
-        for n in 'sbme':#逐个查找前一个状态与当前字的状态概率和发射概率最大值
+        for n in 'sbme':#逐个查找前一个状态与当前字每个状态概率和发射概率最大值,只保留当前字每个状态的最大路径
+            
             nows={}
             for p,v in paths.items():
                 try:
