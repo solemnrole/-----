@@ -1,0 +1,143 @@
+'''
+字法标注与HMM模型：目的分词
+此算法是基本的序列标注任务，采用HMM的三状态进行分词，转移概率和发射概率可通过标注语料获得或者通过词库也可以获得。
+代码实现的思路：1、从字典中构建出转移概率、发射概率、初始概率；2、根据第一步的结果采用viterbi算法求解出最优分词序列；
+因为是从字典中构建概率矩阵，因此不存在s-s、s-b、e-s、e-b这样的转移状态，也相应的缺少例如s状态到其它字（观测序列）的发射概率，
+本文只是简单的说明HMM分词这个算法。
+参：https://kexue.fm/archives/3922
+'''
+import re
+from collections import defaultdict,Counter
+import numpy as np
+f = open('C:/Users/shiwl1/Desktop/folders/data/dpcq.txt', 'r',encoding='utf-8')  # 读取文章
+s = f.read()  # 读取为一个字符串
+s=re.sub('[^A-Za-z\u4e00-\u9fa5]','',s)
+
+#第一步从字典中计算转移概率、发射概率等
+label_dict={i:k for i,k in enumerate('sbme')}
+hmm_model = {i:0 for i in 'sbme'}
+vocab=set()
+#状态转移概率，因为是从字典中构建概率矩阵，因此不存在s-s、s-b、e-s、e-b这样的转移状态，
+# 也相应的缺少例如s状态到其它字（观测序列）的发射概率，所以人为的赋值确实的状态转移概率，发射概率缺失的不好补，只是说明一个问题。
+trans = {i:Counter() for i in 'sbme'}
+emis={i:Counter() for i in 'csbme'}
+with open('dict.txt',encoding='utf-8') as r:
+    for line in r:
+        word,wordf,_=line.split()
+        vocab=vocab|set(list(word))
+        emis['c'][word[0]] += int(wordf)
+        if len(word)==1:
+            hmm_model['s']+=int(wordf)
+            continue
+        elif len(word)==2:
+            hmm_model['b']+=int(wordf)
+            hmm_model['e']+=int(wordf)
+            trans['b']['e']+=int(wordf)
+            emis['b'][word[-1]]+=int(wordf)
+        else:
+            tmp = 'b' + 'm' * (len(word) - 2) + 'e'
+            tl = []
+            for i in range(2):
+                tl += re.findall('(..)', tmp[i:])
+            for k_s in tl:
+                trans[k_s[0]][k_s[1]] += int(wordf)
+
+            hmm_model['b'] += int(wordf)
+            hmm_model['e'] += int(wordf)
+            hmm_model['m'] += int(wordf)*(len(word)-2)
+            if len(word)==3:
+                emis['b'][word[1]] += int(wordf)
+                emis['m'][word[2]] += int(wordf)
+            else:
+                emis['b'][word[1]] += int(wordf)
+                for k in word[2:-1]:
+                    emis['m'][k]+=int(wordf)
+
+#状态初始概率
+state_log_total = np.asarray([hmm_model[i]/sum(hmm_model.values()) for i in 'sbme'])
+#状态转移概率
+
+trans['s']['s']=0.35
+trans['s']['b']=0.65
+trans['e']['s']=0.35
+trans['e']['b']=0.65
+trans['s']['m']=float("-inf")
+trans['s']['e']=float("-inf")
+trans['e']['m']=float("-inf")
+trans['e']['e']=float("-inf")
+trans['m']['b']=float("-inf")
+trans['m']['s']=float("-inf")
+trans['b']['s']=float("-inf")
+
+trans_matrix=[]
+for i in 'sbme':
+    j=trans[i]
+    trans_matrix.append([])
+    for k in 'sbme':
+        trans_matrix[-1].append(j[k])
+trans_matrix=np.asarray(trans_matrix)
+tmp_trans=trans_matrix.copy()
+tmp_trans[np.isneginf(tmp_trans)]=np.nan
+trans_matrix=trans_matrix/np.nansum(tmp_trans,axis=1)
+
+vocab_dict={i:k for i,k in enumerate(vocab)}
+vocab_reverse_dict={k:i for i,k in vocab_dict.items()}
+emis_matrix=np.asarray(4*[[0]*len(vocab)],dtype=np.float)
+for i,_ in enumerate('sbme'):
+    j=emis[_]
+    _=sum(j.values())
+    for k,v in j.items():
+        emis_matrix[i][vocab_reverse_dict[k]]=j[k]/_
+
+
+def forward(obs):
+    #将汉字转换为id
+    obs_str=obs
+    obs=[vocab_reverse_dict[o] for o in obs]
+    N = 4
+    T = len(obs)
+    F = np.zeros((N, T), dtype=float)
+    F[:, 0] = state_log_total * emis_matrix[:, obs[0]]
+
+    for t in range(1, T):
+        for n in range(N):
+            F[n, t] = np.dot(F[:, t - 1], trans_matrix[:, n]) * emis_matrix[n, obs[t]]
+
+    return F
+
+def hmm_cut(obs):
+    #将汉字转换为id
+    obs_str=obs
+    obs=[vocab_reverse_dict[o] for o in obs]
+    path=[]
+    N = 4
+    T = len(obs)
+    F = np.zeros((N, T), dtype=float)
+    F2 = np.zeros((N, T), dtype=float)
+    F[:, 0] = state_log_total * emis_matrix[:, obs[0]]
+    F2[:, 0] = state_log_total * emis_matrix[:, obs[0]]
+    path.append(np.argmax(F[:,0]))
+    prev=np.zeros(T-1,dtype=int)
+    for t in range(1, T):
+        for n in range(N):
+            F2[n, t] = F[path[-1], t - 1]*trans_matrix[path[-1], n] * emis_matrix[n, obs[t]]
+            tmp=F[:, t - 1]*trans_matrix[:, n] * emis_matrix[n, obs[t]]
+            F[n,t]=np.nanmax(tmp)
+        prev[t-1]=np.nanargmax(F[:,t])
+        path.append(np.nanargmax(F[:,t]))
+
+    print([label_dict[p] for p in path])
+    res=[]
+    for i,p in enumerate(path):
+        if p==0:
+            res.append(obs_str[i])
+        if p==1:
+            res.append(obs_str[i])
+        if p==2 or p==3:
+            res[-1]+=obs_str[i]
+    return ' '.join(res)
+
+
+# print(forward('轻叹了一口气'))
+print(hmm_cut('轻叹了一口气'))
+print(hmm_cut('防治规划'))
